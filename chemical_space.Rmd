@@ -1,0 +1,408 @@
+---
+title: "Chemical Space evolution"
+author: "Aylin"
+date: "2026-02-09"
+output: html_document
+---
+
+Diccionario con los nombres de las columnas:
+
+https://support.clarivate.com/ScientificandAcademicResearch/s/article/Web-of-Science-Core-Collection-List-of-field-tags-in-output?language=en_US
+
+
+```{r, message=F, warning=FALSE}
+library(readr)
+library(patchwork)
+library(cowplot)
+library(stringr)
+
+files <- list.files("/DISCO1/Aylin/Chemoinformatics/Chemical_Space/Data/")
+
+data <- c()
+
+for (file in files) {
+  df <- read_tsv(paste0("/DISCO1/Aylin/Chemoinformatics/Chemical_Space/Data/", file))
+  data <- rbind(data, df)
+}
+
+summary(data$PY)
+```
+
+```{r}
+# Define plot aestetics
+theme_yo = 
+  theme(
+  plot.title = element_text(size = 12),
+  panel.grid.minor = element_blank(),
+  panel.grid.major = element_blank(),
+  #axis.title.x = element_text(size=12),
+  #axis.title.y = element_text(size= 12),
+  legend.position = "bottom",
+  legend.key.size = unit(0.4, "cm"),
+  #legend.title = element_text(size = 15), # Legend header
+  legend.text = element_text(size = 11),
+  legend.background = element_rect(fill = "transparent", colour = NA)
+  )
+```
+
+
+```{r}
+library(dplyr)
+count <- data %>% dplyr::count(AU, TI, SO)
+```
+
+
+```{r}
+data = data %>% 
+   distinct(AU, TI, SO, .keep_all = TRUE) %>%
+  filter(PY> 1900) %>%
+  filter(PY < 2026) %>%
+  arrange(PY)
+
+library(tidyverse)
+top_journals <- data %>%
+  dplyr::count(SO) %>%
+  arrange(desc(n)) %>%
+  head(20)
+
+write.table(data, "/DISCO1/Aylin/Chemoinformatics/Chemical_Space/articles.tsv", sep = "\t", row.names = F)
+```
+
+```{r}
+summary(data$PY)
+```
+
+```{r}
+art_year = ggplot(data, aes(PY))+
+    geom_histogram(binwidth = 1, alpha=0.3, color = "black")+
+    theme_bw(base_size = 15)+ 
+   labs(x = "Year", y = "Number of articles")+
+    guides(fill = guide_legend(ncol = 2, byrow = TRUE))+
+   scale_x_continuous(expand = c(0, 0)) +
+    scale_y_continuous(
+    name = "Number of articles",
+    sec.axis = sec_axis(~.*100/5714, name = "Percentage") # Scale labels back up
+  )+
+  theme_yo+
+    theme(
+    plot.title = element_text(size = 12),
+    legend.position = "bottom",
+    legend.key.size = unit(0.3, "cm"),
+    legend.title = element_text(size = 8), # Legend header
+    legend.text = element_text(size = 8),
+    legend.background = element_rect(fill = "transparent", colour = NA)
+    )
+
+art_year
+```
+
+```{r}
+keyword_plot <- function(keywords, title , low, up){
+    
+    keywords_by_decade = c()
+    
+    for (year in c(1995:2025)) {
+    df <- data[which(data$PY == year),]
+    df$searc = paste0(df$DE , " ", df$ID, " ", df$AB, " ", df$TI)
+    
+    results = c()
+  
+    for (method in keywords) {
+      match = df[grep(method, df$searc, ignore.case = TRUE),]
+      
+      results = rbind(results, data.frame(year= year,
+                                Method = method,
+                                Freq = length(match$PT)))}
+  
+    keywords_by_decade = rbind(keywords_by_decade, results)}
+    
+    keywords_by_decade$Method = str_replace_all(keywords_by_decade$Method, pattern = "\\.", " ")
+    
+   # write.table(keywords_by_decade, file = paste0("~/Chemical Space/", title, ".csv"), sep = ",")
+  
+  
+  ggplot(keywords_by_decade[which(keywords_by_decade$year >= 2010), ], aes(year, Freq))+
+    geom_area(aes(fill=Method), alpha=0.3, color = NA )+
+    geom_area(aes(color=Method), linewidth = 0.8, alpha = 0.6, fill= NA)+
+    scale_fill_igv()+
+    scale_color_igv()+
+    theme_bw(base_size = 15)+
+    scale_x_continuous(expand = c(0, 0)) +
+    labs(title = title,
+         x= "Year", 
+         y= "Number of articles")+
+    ylim(low, up)+
+    guides(fill = guide_legend(ncol = 2, byrow = TRUE))+
+    theme_yo+
+    theme(
+    plot.title = element_text(size = 12),
+    legend.position = "bottom",
+    legend.title = element_text(size = 10), # Legend header
+    legend.text = element_text(size = 10),
+    legend.background = element_rect(fill = "transparent", colour = NA)
+    )
+  
+}
+
+
+aligned = align_patches(keyword_plot(c("Machine.Learning", "Deep.Learning", "Artificial.Intelligence", "Neural.Network", "Genetic.Algorithm"), "Data-Driven Methods", 0, 450),
+           keyword_plot(c("Molecular.Docking", "Molecular.Dynamics", "Force.Field", "Density.Functional.Theory", "Molecular.Design", "Pharmacophore", "De.Novo.Design"), "Molecular Modeling & Simulation", 0, 450),
+            keyword_plot(c("QSAR", "QSPR", "Scaffold", "SMILES", "Fingerprints", "Molecular.Networking", "Molecular.Descriptors", "Virtual.Screening", "High.Throughput.screening"), "Cheminformatics / Chemoinformatics", 0, 450))
+
+aligned[1][[1]] = aligned[1][[1]] + geom_vline(xintercept = 2017, 
+                                               linetype = "dashed" , linewidth = 0.5, colour = "black")
+
+fig1 = plot_grid( aligned[1][[1]],
+                  aligned[2][[1]],
+                  aligned[3][[1]], label_size = 12, ncol =3, labels = c("A", "B", "C"))
+fig1
+```
+
+```{r}
+freq_plot <- function(keywords, title , low, up){
+    
+    keywords_by_decade = c()
+    
+    for (year in c(1995:2025)) {
+    df <- data[which(data$PY == year),]
+    df$searc = paste0(df$DE , " ", df$ID, " ", df$AB, " ", df$TI)
+    
+    results = c()
+  
+    for (method in keywords) {
+      match = df[grep(method, df$searc, ignore.case = TRUE),]
+      
+      results = rbind(results, data.frame(year= year,
+                                Method = method,
+                                Freq = length(match$PT)))}
+  
+    keywords_by_decade = rbind(keywords_by_decade, results)}
+    
+    keywords_by_decade$Method = str_replace_all(keywords_by_decade$Method, pattern = "\\.", " ")
+    
+   # write.table(keywords_by_decade, file = paste0("~/Chemical Space/", title, ".csv"), sep = ",")
+  
+  
+  ggplot(keywords_by_decade[which(keywords_by_decade$year >= 2010), ], aes(year, Freq))+
+    geom_col(aes(fill=Method), alpha=0.6, color = "white", position = "fill" )+
+    scale_fill_igv()+
+    scale_color_igv()+
+    theme_bw(base_size = 15)+
+    scale_x_continuous(expand = c(0, 0)) +
+    scale_y_continuous(expand = c(0, 0)) +
+    labs(title = title,
+         x= "Year", 
+         y= "Proportion of articles")+
+    #ylim(low, up)+
+    guides(fill = guide_legend(ncol = 2, byrow = TRUE))+
+    theme_yo+
+    theme(
+    plot.title = element_text(size = 12),
+    legend.position = "none",
+    legend.title = element_text(size = 10), # Legend header
+    legend.text = element_text(size = 10),
+    legend.background = element_rect(fill = "transparent", colour = NA)
+    )
+  
+}
+
+
+aligned = align_patches(freq_plot(c("Machine.Learning", "Deep.Learning", "Artificial.Intelligence", "Neural.Network", "Genetic.Algorithm"), "Data-Driven Methods", 0, 450),
+           freq_plot(c("Molecular.Docking", "Molecular.Dynamics", "Force.Field", "Density.Functional.Theory", "Molecular.Design", "Pharmacophore", "De.Novo.Design"), "Molecular Modeling & Simulation", 0, 450),
+            freq_plot(c("QSAR", "QSPR", "Scaffold", "SMILES", "Fingerprints", "Molecular.Networking", "Molecular.Descriptors", "Virtual.Screening", "High.Throughput.screening"), "Cheminformatics / Chemoinformatics", 0, 450))
+
+fig2 = plot_grid( aligned[1][[1]],
+                  aligned[2][[1]],
+                  aligned[3][[1]], label_size = 12, ncol =3)
+fig2
+```
+
+
+```{r}
+library(magick)
+# 2. Convert an external image to a drawing object
+# You can use a local path or a URL
+img_path <- "/DISCO1/Aylin/Chemoinformatics/Chemical_Space/Figures/VOSviewer.png"
+p2 <- ggdraw() + draw_image(img_path)
+Fig1 = plot_grid(art_year, p2, rel_heights = c(1,2.5), ncol = 1, labels = c("A", "B"))
+
+Fig1
+```
+```{r}
+png(filename="/DISCO1/Aylin/Chemoinformatics/Chemical_Space/Figures/Articles_S.png" ,  
+        height = 10, width = 13, units = "in", res = 300)
+ Fig1
+
+dev.off()
+```
+
+```{r}
+Articles = plot_grid(fig1, fig2, ncol = 1, rel_heights = c(1.3, 1) )
+
+Articles 
+```
+```{r}
+png(filename="/DISCO1/Aylin/Chemoinformatics/Chemical_Space/Figures/Articles.png" ,  
+        height = 9, width = 15, units = "in", res = 300)
+ Articles
+
+dev.off()
+```
+
+
+```{r}
+fig2 = keyword_plot(c( "organic.synthesis", "click.chemistry", "combinatorial", "biosynthesis", "asymmetric.synthesis", "photocatalysis", "enantioselective.synthesis"), "Synthetic Chemistry", 0,120)
+
+fig2
+```
+```{r}
+fig2.1 = freq_plot(c( "organic.synthesis", "click.chemistry", "combinatorial", "biosynthesis", "asymmetric.synthesis", "photocatalysis", "enantioselective.synthesis"), "Synthetic Chemistry", 0,120)
+
+fig2.1
+```
+```{r}
+plot_grid(fig2, fig2.1, ncol = 2, rel_widths = c(1.4, 1), labels = c("A", "B") )
+```
+
+```{r}
+png(filename="/DISCO1/Aylin/Chemoinformatics/Chemical_Space/Figures/Synthetic_chemistry.png" ,  
+        height = 4, width = 10, units = "in", res = 300)
+plot_grid(fig2, fig2.1, ncol = 2, rel_widths = c(1.4, 1), labels = c("A", "B") )
+
+dev.off()
+```
+
+
+
+# tematicas
+
+```{r}
+top_journals$origin = c(1969,1959, #2
+                        1879, 1962, #4
+                        2009, 2010, #6
+                        2010, 1996, #8
+                        1999, 1995, #10
+                        1982, 1939, #12
+                        2007, 2011, #14
+                        1933, 2003, #16
+                        2005, 2016, #18
+                        1987, 2010
+                        ) 
+
+keyword_plot <- function(keywords, title){
+    keywords_by_journal <- data.frame()
+    for (journal in top_journals$SO) {
+      df <- data[which(data$SO == journal),]
+      df$searc = paste0(df$DE , " ", df$ID, " ", df$AB, " ", df$TI)
+      
+      results = c()
+  
+    for (method in keywords) {
+      match = df[grep(method, df$searc, ignore.case = TRUE),]
+      
+      results = rbind(results, data.frame(Journal= df$J9[1],
+                                Method = method,
+                                Freq = length(match$PT)))}
+  
+    keywords_by_journal = rbind(keywords_by_journal, results)
+    }
+    
+    keywords_by_journal$Method = str_replace_all(keywords_by_journal$Method, pattern = "\\.", " ")
+    
+  ggplot(keywords_by_journal, aes(y = Journal, x=Freq))+
+    geom_col(aes(fill=Method), alpha=0.7)+
+    scale_fill_igv()+
+    labs(title = title, x= "Articles")+
+    theme_classic(base_size = 10)+ 
+    guides(fill = guide_legend(ncol = 2, byrow = TRUE))+
+    theme_yo+
+    theme(
+    legend.position = "bottom"
+    )
+  
+}
+
+
+aligned = align_patches(keyword_plot(c("Machine.Learning", "Deep.Learning", "Artificial.Intelligence", "Neural.Network", "Genetic.Algorithm"), "Data-Driven Methods"),
+           keyword_plot(c("Molecular.Docking", "Molecular.Dynamics", "Force.Field", "Density.Functional.Theory", "Molecular.Design", "Pharmacophore", "De.Novo.Design"), "Molecular Modeling & Simulation"),
+            keyword_plot(c("QSAR", "QSPR", "Scaffold", "SMILES", "Fingerprints", "Molecular.Networking", "Molecular.Descriptors", "Virtual.Screening", "High.Throughput.screening"), "Cheminformatics / Chemoinformatics"),
+           keyword_plot(c("Combinatorial.Chemistry", "Organic.Synthesis", "Click.Chemistry", "Combinatorial.Libraries", "Biosynthesis", "Asymmetric.synthesis", "Photocatalysis", "Enantioselective.Synthesis"), "Synthetic Chemistry"))
+
+fig3= plot_grid( aligned[1][[1]],
+                  aligned[2][[1]],
+                  aligned[3][[1]],
+                 aligned[4][[1]], ncol =2, labels = c("A", "B", "C", "D"))
+fig3
+```
+
+
+```{r}
+png(filename="/DISCO1/Aylin/Chemoinformatics/Chemical_Space/Figures/Journals.png",  height = 9, width = 11, units = "in", res = 300)
+
+fig3
+dev.off()
+
+```
+
+```{r}
+keyword_plot <- function(keywords, title){
+    keywords_by_journal <- data.frame()
+    for (journal in top_journals$SO) {
+      df <- data[which(data$SO == journal),]
+      df$searc = paste0(df$DE , " ", df$ID, " ", df$AB, " ", df$TI)
+      
+      results = c()
+      
+      scale_factor = 2026 - top_journals[which(top_journals$SO == journal), "origin"][[1]] 
+  
+    for (method in keywords) {
+      match = df[grep(method, df$searc, ignore.case = TRUE),]
+      
+      results = rbind(results, data.frame(Journal= df$J9[1],
+                                Method = method,
+                                Freq = length(match$PT)/ scale_factor
+                                ))}
+  
+    keywords_by_journal = rbind(keywords_by_journal, results)
+    }
+    
+    keywords_by_journal$Method = str_replace_all(keywords_by_journal$Method, pattern = "\\.", " ")
+    
+  ggplot(keywords_by_journal, aes(y = Journal, x=Freq))+
+    geom_col(aes(color=Method), fill= NA, alpha=0.4, linewidth = 0.6)+
+    geom_col(aes(fill=Method),color = NA, alpha=0.4)+
+    scale_fill_jco()+
+    scale_color_jco()+
+    labs(title = title, x= "Normalized number of articles")+
+    theme_bw(base_size = 10)+ 
+    scale_x_continuous(expand = c(0, 0)) +
+    guides(fill = guide_legend(ncol = 2, byrow = TRUE))+
+    theme_yo+
+    theme(
+    legend.position = "bottom",
+    legend.text = element_text(size = 11)
+    )
+  
+}
+
+
+aligned = align_patches(keyword_plot(c("Machine.Learning", "Deep.Learning", "Artificial.Intelligence", "Neural.Network", "Genetic.Algorithm"), "Data-Driven Methods"),
+           keyword_plot(c("Molecular.Docking", "Molecular.Dynamics", "Force.Field", "Density.Functional.Theory", "Molecular.Design", "Pharmacophore", "De.Novo.Design"), "Molecular Modeling & Simulation"),
+            keyword_plot(c("QSAR", "QSPR", "Scaffold", "SMILES", "Fingerprints", "Molecular.Networking", "Molecular.Descriptors", "Virtual.Screening", "High.Throughput.screening"), "Cheminformatics / Chemoinformatics"),
+           keyword_plot(c("Combinatorial.Chemistry", "Organic.Synthesis", "Click.Chemistry", "Combinatorial.Libraries", "Biosynthesis", "Asymmetric.synthesis", "Photocatalysis", "Enantioselective.Synthesis"), "Synthetic Chemistry"))
+
+fig3= plot_grid( aligned[1][[1]],
+                  aligned[2][[1]],
+                  aligned[3][[1]],
+                 aligned[4][[1]], ncol =2, labels = c("A", "B", "C", "D"))
+fig3
+```
+
+
+```{r}
+png(filename="/DISCO1/Aylin/Chemoinformatics/Chemical_Space/Figures/Journals_scaled.png",  height = 10, width = 13, units = "in", res = 300)
+
+fig3
+dev.off()
+
+```

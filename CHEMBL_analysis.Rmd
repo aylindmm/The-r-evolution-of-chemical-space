@@ -1,0 +1,595 @@
+---
+title: "ChemBL"
+author: "Aylin"
+date: "2026-02-13"
+output: html_document
+---
+
+Analisis de bases de datos 
+
+```{r}
+library(DBI)
+library(RSQLite)
+library(ggplot2)
+library(ggsci)
+
+# Replace "my_database.sqlite" with the actual path to your file
+con <- dbConnect(RSQLite::SQLite(), "/DISCO1/Aylin/Data_Bases/ChEMBL/chembl_36/chembl_36.db")
+dbListTables(con)
+```
+
+```{r}
+#load the databases
+molecule_dictionary <- dbReadTable(con, "molecule_dictionary")
+compound_properties <- dbReadTable(con, "compound_properties")
+compound_records <- dbReadTable(con, "compound_records")
+compound_structures <- dbReadTable(con, "compound_structures")
+docs <- dbReadTable(con, "docs")
+#disconect
+dbDisconnect(con)
+
+# Load Murcko scaffolds 
+SCAFFOLDS = read.csv("/DISCO1/Aylin/Chemoinformatics/Chemical_Space/chembl_scaffoldsParallel.csv")
+```
+
+# Number of molecules
+```{r}
+length(unique(molecule_dictionary$chembl_id))
+```
+
+
+```{r}
+table(molecule_dictionary$molecule_type)
+```
+
+```{r}
+library(dplyr)
+compound_articles = merge(compound_records, docs, by= "doc_id")
+
+compound_articles <- compound_articles %>%
+  # Filter out actual NA values
+  filter(!is.na(year)) %>% 
+  #filter(molecule_type == "Small molecule")%>%
+  group_by(molregno) %>%
+  # Assign the result to a new variable name (e.g., first_year)
+  mutate(first_year = min(year)) %>%
+  ungroup()
+
+compound_prop_per_year= merge(compound_properties, compound_articles, by="molregno")
+
+compound_prop_per_year = merge(compound_prop_per_year, SCAFFOLDS, by = "molregno")
+
+compound_prop_per_year = merge(compound_prop_per_year, molecule_dictionary, by = "molregno")
+
+summary(compound_prop_per_year$first_year)
+```
+
+```{r}
+table(duplicated(compound_prop_per_year$molregno))
+```
+
+
+```{r}
+table(is.na(compound_prop_per_year$year))
+```
+
+
+```{r}
+# Filter compounds
+compound_prop_per_year[is.na(compound_prop_per_year$molecule_type),"molecule_type"] = "Unknown"
+#compound_prop_per_year = compound_prop_per_year[which(compound_prop_per_year$year > 1975),]
+
+# Define plot aestetics
+theme_yo = 
+  theme(
+  plot.title = element_text(size = 12),
+  panel.grid.minor = element_blank(),
+  panel.grid.major = element_blank(),
+  legend.position = "bottom",
+  panel.border = element_rect(colour = "black", fill=NA, linewidth=1),
+  legend.key.size = unit(0.3, "cm"),
+  legend.background = element_rect(fill = "transparent", colour = NA)
+  )
+
+compounds_per_year <- compound_prop_per_year %>%
+  dplyr::count(year, molecule_type)
+
+ggplot(compounds_per_year, aes(year, n))+
+  geom_col(aes(fill = molecule_type))+
+  scale_fill_jco()+
+  scale_x_continuous(expand = c(0, 0)) + scale_y_continuous(expand = c(0, 0))+
+  theme_bw(base_size = 10)+ 
+  guides(color = guide_legend(ncol = 2, byrow = TRUE))+
+  geom_vline(xintercept = 2020, linetype = "dashed")+
+  labs(title = "Compounds Cited Per Year")+
+  theme_yo
+```
+
+```{r}
+compounds_per_year <- compound_prop_per_year %>%
+  group_by(molregno) %>%
+  filter(year == min(year)) %>%
+  distinct(year, .keep_all = TRUE) %>%
+  ungroup() 
+
+plot = compounds_per_year %>%
+  dplyr::count(year, molecule_type)
+
+
+plot1 = ggplot(plot, aes(year, n))+
+  geom_area(aes(color = molecule_type), fill = NA, linewidth = 1)+
+  geom_area(aes(fill = molecule_type), color = NA, alpha = 0.2)+
+  labs(y = "Number of molecules", 
+       x = "First citation year")+ 
+  scale_fill_discrete(name= "Molecule type", palette = pal_igv())+
+  scale_color_discrete(name= "Molecule type", palette = pal_igv())+
+  #guides(fill = guide_legend(ncol = 2, byrow = TRUE), color = guide_legend(ncol = 2, byrow = TRUE))+
+  theme_bw(base_size = 10)+
+   scale_x_continuous(expand = c(0,0)) +
+  theme_yo
+
+plot1
+```
+
+
+```{r}
+plot <- compound_prop_per_year %>%
+  dplyr::count(year, natural_product)
+
+ggplot(plot[which(plot$natural_product == 1),], aes(year, n))+
+  geom_col()+
+  scale_fill_jco()+
+  guides(color = guide_legend(ncol = 2, byrow = TRUE))+
+  geom_vline(xintercept = 2020, linetype = "dashed")+
+  labs(title = "Natural Compounds Cited Per Year")+
+  theme_classic(base_size = 10)+
+  theme_yo
+```
+```{r}
+plot = compounds_per_year %>%
+  dplyr::count(year, natural_product)
+
+
+ggplot(plot[which(plot$natural_product == 1),], aes(year, n))+
+  geom_col( alpha = 0.8)+
+  scale_fill_jco()+
+  guides(color = guide_legend(ncol = 2, byrow = TRUE))+
+  geom_vline(xintercept = 2020, linetype = "dashed")+
+  labs(title = "New Natural Compounds Per Year")+
+  theme_classic(base_size = 10)+
+  theme_yo
+```
+
+```{r}
+library(reshape2)
+plot_data = compounds_per_year[, c("molecule_type", "alogp","hba", "hbd", "psa", "rtb", "full_mwt", "aromatic_rings", "heavy_atoms")]
+
+plot_data = melt(plot_data, id.vars = "molecule_type" )
+
+name_map <- c("full_mwt" = "Molecular Weight", 
+              "alogp" = "ALOGP",
+              "hba" = "HBA",
+              "hbd" = "HBD",
+              "psa" = "PSA",
+              "rtb" = "RTB",
+              "aromatic_rings" = "Aromatic Rings",
+              "heavy_atoms" = "Heavy Atoms",
+              "np_likeness_score" = "NP likeness score")
+
+S1 = ggplot(plot_data, aes(y=value, x=molecule_type))+
+  geom_boxplot(outliers = FALSE)+
+  facet_wrap(.~variable, scales = "free_y", ncol= 3, 
+             labeller = as_labeller(name_map))+
+  xlab("\n Molecule Type")+
+  theme_classic(base_size = 10)+ 
+  theme_yo +
+  theme(axis.text.x = element_text(angle = 45, hjust = 0.5, vjust = 0.5, size = 5),
+          strip.background = element_rect(fill="white")
+        )
+
+S1
+```
+```{r}
+png(filename="/DISCO1/Aylin/Chemoinformatics/Chemical_Space/Figures/S1.png" ,  
+        height = 15.7, width = 20, units = "in", res = 300)
+S1
+
+  dev.off()
+```
+
+
+```{r}
+# Total existing scaffolds per year
+
+compound_prop_unique_year = compound_prop_per_year %>%
+    group_by(molregno)%>%
+    filter(year == first_year)%>%
+    ungroup()
+
+plot_data = compound_prop_unique_year[, c("year","alogp","hba", "hbd", "psa", "rtb", "full_mwt", "aromatic_rings", "heavy_atoms", "np_likeness_score")]
+
+plot_data = melt(plot_data, "year")
+
+S2 = ggplot(plot_data, aes(as.factor(year), value))+
+  geom_boxplot(outliers = FALSE)+
+  facet_wrap(.~variable, scales = "free_y", ncol= 3, 
+             labeller = as_labeller(name_map))+
+  xlab("Release year")+
+  theme_classic(base_size = 10)+ 
+  theme_yo +
+  theme(axis.text.x = element_text(angle = 45, hjust = 0.5, vjust = 0.5, size = 5),
+          strip.background = element_rect(fill="white")
+        )
+
+S2
+```
+# Scaffolds per year
+
+Shanon diversity index citation:
+
+Shannon, C.E. & Weaver, W. (1949) The mathematical theory of communication. The University of Illinois Press, Urbana, 117pp.
+
+https://onlinelibrary.wiley.com/doi/abs/10.1002/qsar.200960069 
+
+Calculation:
+
+https://bio.libretexts.org/Courses/Gettysburg_College/01%3A_Ecology_for_All/22%3A_Biodiversity/22.02%3A_Diversity_Indices
+
+
+
+
+```{r}
+scaffolds_per_year <- compound_prop_per_year %>%
+  dplyr::count(year, scaffold) %>%  # Count combinations of year and scaffold
+  group_by(year) %>%            # Group by 'am' to calculate proportions within each 'am' category
+  mutate(p = n / sum(n)) %>%
+  mutate(H = p * log(p))  %>% 
+  summarise(
+    Total_Scaffolds = n(),                 # Number of unique scaffolds (S)
+    SE = -sum(H),  
+    SEE = SE / log(Total_Scaffolds) # Shannon Equitability (EH)
+  )
+
+plot = melt(scaffolds_per_year, "year")
+
+ggplot(plot, aes(year, value))+
+  geom_col()+
+  facet_wrap(.~variable, scales="free")+
+  scale_fill_jco()+
+  guides(color = guide_legend(ncol = 2, byrow = TRUE))+
+  labs(title = "Scaffolds Cited Per Year")+
+  theme_yo
+
+```
+
+```{r}
+tot_scaffolds_year = c()
+
+for (i in unique(1975:2024)) {
+  df = compound_prop_unique_year %>%
+    filter(year <= i ) %>%
+    dplyr::count(scaffold) %>%
+    mutate(p = n / sum(n)) %>%
+    mutate(H = p * log(p))  %>% 
+    summarise(
+      Total_Scaffolds = n(),                 # Number of unique scaffolds (S)
+      SE = -sum(H),  
+      SEE = SE / log(Total_Scaffolds) # Shannon Equitability (EH)
+  )
+  df$year = i
+  tot_scaffolds_year = rbind(tot_scaffolds_year, df)
+}
+
+plot = melt(tot_scaffolds_year,"year")
+plot = plot[which(plot$year > 1975),]
+
+name_map <- c("Total_Scaffolds" = "Number of Scaffolds", 
+              "SE" = "Shannon Entropy (SE)",
+              "SEE" = "Shannon Equitability (SEE)")
+
+plot2 = ggplot(plot, aes(year, value))+
+  geom_line(color = "black") +
+ # geom_area(aes(fill = variable), alpha = 0.2) +
+  facet_wrap(.~variable, scales="free", 
+             labeller = as_labeller(name_map)) +
+  guides(color = guide_legend(ncol = 2, byrow = TRUE)) +
+  labs(y = "Value", x = "Year")+
+  theme_bw(base_size = 22)+ 
+  scale_x_continuous(expand = c(0,0)) +
+  theme_yo +
+  theme(strip.background = element_blank(), strip.text = element_text(size=20),
+        legend.position = "none")
+
+plot2
+```
+
+
+```{r}
+tsne= read.csv("/DISCO1/Aylin/Chemoinformatics/Chemical_Space/chembl_generic_framework_tsne.csv")
+
+# Number of generic frameworks per year
+
+generic_f_year = compound_prop_unique_year %>%
+  dplyr::count(year, generic_framework) %>%
+  filter(generic_framework != "")
+
+generic_f_year = merge(generic_f_year, tsne[, c("generic_framework","tsne1","tsne2")])
+```
+
+
+
+```{r}
+library(cowplot)
+# 1. Define the years you want
+years <- c(1980, 1990, 2000, 2010, 2020, 2024)
+base_path <- "/DISCO1/Aylin/Chemoinformatics/Chemical_Space/Scaffolds/CS_"
+
+# 2. Create a list of plots
+plot_list <- lapply(years, function(yr) {
+  img_path <- paste0(base_path, yr, ".png")
+  
+  # Create the drawing
+  ggdraw() + 
+    draw_image(img_path) 
+})
+
+# 3. Arrange them into a grid (2 rows, 3 columns)
+combined_plot <- plot_grid(plotlist = plot_list, ncol = 3)
+
+plot3 = plot_grid(plot2, combined_plot, rel_heights = c(1,2), ncol = 1, labels = c("A", "B"), label_size = 20)
+
+plot3
+```
+
+
+```{r}
+png(filename="/DISCO1/Aylin/Chemoinformatics/Chemical_Space/Figures/Chem_space_year.png" ,  
+        height = 15.7, width = 20, units = "in", res = 300)
+plot3
+
+  dev.off()
+```
+
+
+```{r}
+scaffold_freq = compound_prop_unique_year %>%
+  dplyr::count(scaffold) %>%
+  mutate(p =( n / sum(n))*100) %>%
+  arrange(p, decreasing = TRUE) %>%
+  mutate(cum = cumsum(p))
+
+write.table(scaffold_freq, "/DISCO1/Aylin/Chemoinformatics/Chemical_Space/scaffolds.csv", sep = ",", row.names = F, quote = F )
+```
+
+
+
+# PDB
+
+```{r}
+library(readr)
+# We read the headers first to get the names automatically
+pdb_data <- read_csv("/DISCO1/Aylin/Chemoinformatics/Chemical_Space/pdb_data.csv")
+
+plot <- pdb_data %>%
+  dplyr::count(deposition_year, exptl_method) %>%
+  filter(exptl_method %in% c("X-RAY DIFFRACTION", "SOLUTION NMR", "ELECTRON MICROSCOPY")) %>%
+  filter(deposition_year < 2026)
+
+PDB1 = ggplot(plot, aes(deposition_year, n))+
+  geom_line(aes(color = exptl_method), alpha = 0.8, size=1)+
+  geom_area(aes(fill = exptl_method), alpha = 0.2, size=1, position = 'identity')+
+  scale_color_discrete(name= "Method",
+                       labels = c("Electron Microscopy",
+                                  "Solution NMR",
+                                  "X-Ray Diffraction"), palette = pal_igv())+
+    scale_fill_discrete(name= "Method",
+                       labels = c("Electron Microscopy",
+                                  "Solution NMR",
+                                  "X-Ray Diffraction"), palette = pal_igv())+
+  guides(color = guide_legend(ncol = 3, byrow = TRUE))+
+  labs(x= "Deposition year", 
+       y= "Number of structures")+
+    scale_x_continuous(expand = c(0, 0)) +
+  theme_bw(base_size = 10)+ 
+  theme_yo
+
+PDB1
+```
+
+```{r}
+plot <- pdb_data %>%
+  dplyr::count(deposition_year, rcsb_entry_info.selected_polymer_entity_types) %>%
+  #filter(exptl_method %in% c("X-RAY DIFFRACTION", "SOLUTION NMR", "ELECTRON MICROSCOPY")) %>%
+  filter(deposition_year < 2026)
+
+PDB2 = ggplot(plot, aes(deposition_year, n))+
+  geom_line(aes(color = rcsb_entry_info.selected_polymer_entity_types), alpha = 1, size=1)+
+  geom_area(aes(fill = rcsb_entry_info.selected_polymer_entity_types), alpha = 0.2, size=1, position = 'identity')+
+  scale_fill_discrete(name= "Polymer Type", palette = pal_igv())+
+  scale_color_discrete(name= "Polymer Type", palette = pal_igv())+
+  guides(color = guide_legend(ncol = 2, byrow = TRUE))+
+  labs(x= "Deposition year", 
+       y= "Number of structures")+
+  scale_x_continuous(expand = c(0,0)) +
+  theme_bw(base_size = 10)+ 
+  theme_yo
+
+PDB2
+```
+
+
+```{r}
+plot <- pdb_data %>%
+  filter(exptl_method %in% c("X-RAY DIFFRACTION", "ELECTRON MICROSCOPY")) %>%
+  filter(deposition_year < 2026)
+
+PDB3 = ggplot(plot, aes(y=resolution, x=as.factor(deposition_year)))+
+  geom_boxplot( outliers = FALSE, aes(color= exptl_method), alpha = 0.8)+
+ #facet_wrap(.~exptl_method, scales= "free_x")+
+  scale_color_discrete(name= "Method",
+                       labels = c("Electron Microscopy",
+                                  "X-Ray Diffraction"), palette = pal_igv())+
+  labs(y= "Resolution (Å)", 
+       x= "Deposition year")+
+    theme_bw(base_size = 10)+ 
+    theme_yo +
+  theme(axis.text.x = element_text(angle = 45, hjust = 0.5, vjust = 0.5, size = 5),
+        strip.background = element_rect(fill="white"))
+
+PDB3
+```
+
+
+```{r}
+a_pdb = align_patches(PDB1, PDB2)
+
+
+pdb = plot_grid(plot_grid(a_pdb[2][[1]], a_pdb[1][[1]], ncol=2, labels = c("A", "B"), label_size = 9), PDB3, ncol= 1, labels = c("", "C"),  label_size = 9)
+
+pdb
+```
+
+
+```{r}
+png(filename="/DISCO1/Aylin/Chemoinformatics/Chemical_Space/Figures/PDB.png" ,  
+        height = 6, width = 9, units = "in", res = 300)
+  pdb
+
+dev.off()
+```
+
+# Per ChemBL release
+
+```{r}
+library(stringr)
+
+dbs = list.files("/DISCO1/Aylin/Data_Bases/ChEMBL", pattern = "chembl")
+
+all_releases = c()
+for (dir in dbs) {
+  #print(list.files(paste0("/DISCO1/Aylin/Data_Bases/ChEMBL/", dir)))
+  con <- dbConnect(RSQLite::SQLite(), paste0("/DISCO1/Aylin/Data_Bases/ChEMBL/", dir, "/", dir, ".db" ))
+  print(paste0("conected to ", dir, "    ",length(dbListTables(con))))
+  compound_p <- try(dbReadTable(con, "compound_properties"))
+  if (inherits(compound_p, "try-error")) {
+    print("There was an error, trying with molecule_dictionary")
+    
+    compound_p <- try(dbReadTable(con, "compounds"))
+    compound_p$DB = dir
+    compound_p$release = str_split(dir, pattern = "_")[[1]][2]
+  
+    all_releases = rbind(all_releases, compound_p[,c("molregno", "DB", "release")])
+    
+  } else {
+    compound_p$DB = dir
+    compound_p$release = str_split(dir, pattern = "_")[[1]][2]
+  
+    all_releases = rbind(all_releases, compound_p[,c("molregno", "DB","release")])
+  
+}
+ dbDisconnect(con)
+}
+
+
+all_releases$release = as.numeric(all_releases$release)
+
+unique(all_releases$release)
+```
+
+
+```{r}
+library(stringr)
+
+prop_per_release <- merge(all_releases, compound_properties, by="molregno")
+prop_per_release <- merge(prop_per_release, molecule_dictionary, by="molregno")
+prop_per_release <- merge(prop_per_release, SCAFFOLDS, by="molregno")
+
+prop_per_release$release = as.numeric(prop_per_release$release)
+
+prop_per_release[is.na(prop_per_release$molecule_type),"molecule_type"] = "Unknown"
+
+compounds_per_release <- prop_per_release %>%
+  dplyr::count(DB, molecule_type)
+
+compounds_per_release$DB = str_replace(compounds_per_release$DB, "chembl_", " ")
+
+chembl = ggplot(compounds_per_release, aes(as.numeric(DB), as.numeric(n)))+
+    geom_area(aes(color=molecule_type), fill = NA, linewidth = 1)+
+   geom_area(aes(fill=molecule_type), color = NA, alpha= 0.2)+
+    scale_color_discrete(name= "Molecule type", palette = pal_igv())+
+    scale_fill_discrete(name= "Molecule type", palette = pal_igv())+
+    theme_classic(base_size = 10)+ 
+    labs(x = "\n ChEMBL release number", y = "Number of molecules")+
+    #guides(fill = guide_legend(ncol = 2, byrow = TRUE), color = guide_legend(ncol = 2, byrow = TRUE))+
+  scale_x_continuous(expand = c(0,0)) +
+  theme_yo
+
+chembl
+
+```
+
+```{r}
+library(ggpubr)
+a_plots = align_patches(chembl, plot1)
+
+Num_mol = ggpubr::ggarrange(
+  a_plots[1][[1]], a_plots[2][[1]], # list of plots
+  labels = c("A", "B"), # labels
+  common.legend = TRUE, # COMMON LEGEND
+  legend = "bottom", # legend position
+  align = "hv", # Align them both, horizontal and vertical
+  nrow = 1 # number of rows
+)
+Num_mol
+```
+
+
+
+```{r}
+delta_compounds <- plot %>%
+  filter(year > 1976)%>%
+  group_by(year) %>%
+  mutate(sum = sum(n)) %>%
+  slice_head(n=1) %>% 
+  arrange(year) %>%
+  ungroup %>%
+  mutate(cum =cumsum(sum))%>%
+  mutate(delta =cum - lag(cum))%>%
+ mutate(percentage = delta/lag(cum)*100)
+
+delta_compounds[which(cdelta_compounds$year >= 1980),]$percentage)
+```
+
+```{r}
+plotc =  ggplot(delta_compounds[which(delta_compounds$year >= 1980),], aes(year, as.numeric(percentage)))+
+    geom_line( alpha= 0.8, linewidth = 1.5)+
+   geom_hline(yintercept = 11.586, linetype = "dashed", colour = "blue") +
+    scale_color_discrete(name= "Molecule type", palette = pal_igv())+
+    theme_bw(base_size = 10)+ 
+    labs(x = "\n Year", y = "Growth percentage")+
+    guides(fill = guide_legend(ncol = 3, byrow = TRUE))+
+  theme_yo
+
+
+plotc
+```
+
+```{r}
+Num_mol2 = ggpubr::ggarrange(
+  Num_mol, plotc, # list of plots
+  labels = c("", "C"), # labels
+  common.legend = TRUE, # COMMON LEGEND
+  legend = "bottom", # legend position
+  align = "h", # Align them both, horizontal and vertical
+  nrow = 2, heights = c(1.5, 1) # number of rows
+)
+Num_mol2
+```
+
+```{r}
+png(filename="/DISCO1/Aylin/Chemoinformatics/Chemical_Space/Figures/NUM_molecules.png" ,  
+        height = 8, width = 10, units = "in", res = 300)
+  Num_mol2
+
+dev.off()
+```
